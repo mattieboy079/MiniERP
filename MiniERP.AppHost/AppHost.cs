@@ -1,9 +1,11 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
 // SQL Server database (runs in a container, needs Docker/Podman).
-// A data volume keeps the database contents across restarts.
+// A named data volume keeps the database contents across restarts. To reset the
+// database from scratch (schema is owned by EF Core migrations), stop the app and
+// run: docker volume rm minierp-sqldata
 var sql = builder.AddSqlServer("sql")
-    .WithDataVolume();
+    .WithDataVolume("minierp-sqldata");
 
 var database = sql.AddDatabase("minierpdb");
 

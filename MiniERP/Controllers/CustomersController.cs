@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using MiniERP.Dtos.Products;
+using MiniERP.Dtos.Customers;
 using MiniERP.Handlers;
 using MiniERP.Security;
 
@@ -9,19 +9,19 @@ namespace MiniERP.Controllers;
 [ApiController]
 [Route("[controller]")]
 [Authorize] // any authenticated user may read; writes are further restricted below
-public class ProductsController(IProductHandler handler) : ControllerBase
+public class CustomersController(ICustomerHandler handler) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> GetAll()
-        => Ok(await handler.GetAllAsync());
+    public async Task<IActionResult> GetAll([FromQuery] string? search)
+        => Ok(await handler.GetAllAsync(search));
 
-    [HttpGet("low-stock/count")]
-    public async Task<IActionResult> LowStockCount()
-        => Ok(await handler.GetLowStockCountAsync());
+    [HttpGet("count")]
+    public async Task<IActionResult> Count()
+        => Ok(await handler.GetCountAsync());
 
     [Authorize(Roles = Roles.Admin)]
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] CreateProductRequest request)
+    public async Task<IActionResult> Create([FromBody] CreateCustomerRequest request)
     {
         var created = await handler.CreateAsync(request);
         return CreatedAtAction(nameof(GetAll), new { id = created.Id }, created);
@@ -29,7 +29,7 @@ public class ProductsController(IProductHandler handler) : ControllerBase
 
     [Authorize(Roles = Roles.Admin)]
     [HttpPut("{id}")]
-    public async Task<IActionResult> Update(int id, [FromBody] UpdateProductRequest request)
+    public async Task<IActionResult> Update(int id, [FromBody] UpdateCustomerRequest request)
     {
         var updated = await handler.UpdateAsync(id, request);
         return updated is null ? NotFound() : Ok(updated);
