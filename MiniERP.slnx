@@ -1,3 +1,5 @@
 <Solution>
+  <Project Path="MiniERP.AppHost/MiniERP.AppHost.csproj" />
+  <Project Path="MiniERP.ServiceDefaults/MiniERP.ServiceDefaults.csproj" />
   <Project Path="MiniERP/MiniERP.csproj" />
 </Solution>
