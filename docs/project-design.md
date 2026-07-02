@@ -19,6 +19,7 @@ the `DbContext` and `CustomerController` is an empty, half-wired stub.
 | 4 | **REST-conform verbs on `CustomersController`** (`PUT /{id}` for update, `DELETE /{id}` for delete) | Replaces the stub's `POST`-only shape; makes the HTTP contract predictable and mirrors the planned Products refactor. |
 | 5 | **`Product` owns its pricing and stock (single-tenant)** | `Price`, `CostPrice`, `MinimumStock` and `CurrentStock` live directly on `Product`. No per-customer product model — "low stock" is a plain product-level condition. |
 | 6 | **Cookie authentication with two app-wide roles (`Admin`, `User`)** | Login issues an ASP.NET cookie (no full Identity stack); accounts are seeded. `Admin` has all CRUD, `User` is read-only. Roles are **global** — auth introduces no per-customer identity. Write endpoints require `Admin`; every business endpoint requires authentication. See §12. |
+| 7 | **A `Quote` (offerte) is a *composed*, price-frozen document** | Quotes are the first use case spanning aggregates: the handler reads Customers and Products via their services and snapshots the customer name plus each line's product name/article/unit price at save time. Product/customer FKs are nullable with `ON DELETE SET NULL` so a saved quote survives their deletion. Totals (per-line + overall discount, then 21% VAT) are **derived on read, never stored**, so they can't drift. See §13. |
 
 ## 3. Layer responsibilities
 
@@ -78,30 +79,44 @@ HTTP request
 MiniERP/
 ├── Controllers/
 │   ├── ProductsController.cs
-│   └── CustomersController.cs
+│   ├── CustomersController.cs
+│   └── QuotesController.cs
 ├── Handlers/
 │   ├── IProductHandler.cs
 │   ├── ProductHandler.cs
 │   ├── ICustomerHandler.cs
-│   └── CustomerHandler.cs
+│   ├── CustomerHandler.cs
+│   ├── IQuoteHandler.cs
+│   └── QuoteHandler.cs
 ├── Services/
 │   ├── IProductService.cs
 │   ├── ProductService.cs
 │   ├── ICustomerService.cs
-│   └── CustomerService.cs
+│   ├── CustomerService.cs
+│   ├── IQuoteService.cs
+│   └── QuoteService.cs
 ├── Dtos/
 │   ├── Products/
 │   │   ├── ProductResponse.cs
 │   │   ├── CreateProductRequest.cs
 │   │   └── UpdateProductRequest.cs
-│   └── Customers/
-│       ├── CustomerResponse.cs
-│       ├── CreateCustomerRequest.cs
-│       └── UpdateCustomerRequest.cs
+│   ├── Customers/
+│   │   ├── CustomerResponse.cs
+│   │   ├── CreateCustomerRequest.cs
+│   │   └── UpdateCustomerRequest.cs
+│   └── Quotes/
+│       ├── QuoteResponse.cs
+│       ├── QuoteSummaryResponse.cs
+│       ├── QuoteLineResponse.cs
+│       ├── CreateQuoteRequest.cs
+│       ├── UpdateQuoteRequest.cs
+│       └── QuoteLineRequest.cs
 ├── Data/
 │   ├── MiniErpDbContext.cs
 │   ├── Product.cs
-│   └── Customer.cs
+│   ├── Customer.cs
+│   ├── Quote.cs
+│   └── QuoteLine.cs
 ├── Extensions/
 │   └── ServiceCollectionExtensions.cs   ← DI registration lives here
 └── Program.cs
@@ -121,10 +136,12 @@ public static class ServiceCollectionExtensions
         // Handlers (use-case layer)
         services.AddScoped<IProductHandler, ProductHandler>();
         services.AddScoped<ICustomerHandler, CustomerHandler>();
+        services.AddScoped<IQuoteHandler, QuoteHandler>();
 
         // Services (persistence layer)
         services.AddScoped<IProductService, ProductService>();
         services.AddScoped<ICustomerService, CustomerService>();
+        services.AddScoped<IQuoteService, QuoteService>();
 
         return services;
     }
@@ -379,3 +396,83 @@ Controller → Handler → Service layering as the other slices.
 - **Role gating:** the Products and Customers pages hide the "toevoegen" button and the
   per-row Wijzig/Verwijder actions (and the actions column) unless `isAdmin`. The API is
   the real gate; the UI mirrors it.
+
+## 13. Quotes slice (implemented 2026-07-02)
+
+The first **composed** use case (decision #7): an offerte selects a customer and lists
+products with quantities, freezes their prices, and totals them with per-line + overall
+discount and VAT. Realises the "create an order" scenario anticipated in §3.
+
+### Entities & persistence
+
+- `Quote` = `Id, CustomerId (int?), CustomerName (snapshot), CreatedDate, ValidUntil,
+  OverallDiscountPercent, VatRate`, with `Lines: List<QuoteLine>`.
+- `QuoteLine` = `Id, QuoteId, ProductId (int?), ProductName + ArticleNumber + UnitPrice
+  (snapshot), Quantity, LineDiscountPercent`.
+- Registered as `DbSet<Quote> Quotes` / `DbSet<QuoteLine> QuoteLines`. The
+  `Quote → Customer` and `QuoteLine → Product` FKs are **nullable, `ON DELETE SET NULL`**
+  (the snapshot keeps the document intact after a delete); `Quote → Lines` is
+  **`ON DELETE Cascade`**. Migration: `AddQuotes`.
+- **Snapshot rule:** at create *and* update the handler copies the customer name and each
+  product's name/article/unit price onto the rows. Editing re-snapshots from current data;
+  `CreatedDate` is immutable across edits.
+- **Offertenummer** is derived from the key as `OFF-{Id:D5}` (race-free, no counter),
+  computed in the handler — not a stored column.
+- **Seeding** (`Program.cs`): one sample quote off the first seeded customer and two
+  products, so the dashboard widget has data.
+
+### Totals (derived, never stored)
+
+Computed in `QuoteHandler` for the response DTO on unrounded intermediates, then rounded to
+2 decimals (away-from-zero):
+- regeltotaal = `Quantity × UnitPrice × (1 − LineDiscountPercent/100)`
+- subtotaal = Σ regeltotaal → na korting = `× (1 − OverallDiscountPercent/100)`
+- BTW = `na korting × VatRate/100` (VatRate = **21**) → totaal = na korting + BTW
+
+### Layering note
+
+`QuoteHandler(IQuoteService, IProductService, ICustomerService)` is the one place
+cross-aggregate orchestration lives: it validates + reads Customer/Product via their own
+services and persists via `QuoteService`. `QuoteService` touches **only** the Quote
+aggregate (with `.Include(q => q.Lines)`), honouring "a service owns one aggregate." An
+unknown customer/product reference throws `ArgumentException`, which the controller maps to
+`400`; a missing quote id returns `null` → `404` (matching the existing not-found idiom).
+
+### Endpoints (`QuotesController`, route `/quotes`)
+
+| Verb & route | Operation | Handler | Response |
+|---|---|---|---|
+| `GET /quotes?search=` | List (summary rows) | `GetAllAsync(search)` | `200` + `QuoteSummaryResponse[]` |
+| `GET /quotes/count` | Count | `GetCountAsync()` | `200` + `int` |
+| `GET /quotes/{id}` | Detail with lines & totals | `GetByIdAsync(id)` | `200` + `QuoteResponse`, or `404` |
+| `POST /quotes` | Create | `CreateAsync(CreateQuoteRequest)` | `201` + `QuoteResponse`, or `400` |
+| `PUT /quotes/{id}` | Update (re-snapshots) | `UpdateAsync(id, UpdateQuoteRequest)` | `200` + `QuoteResponse`, `404`, or `400` |
+| `DELETE /quotes/{id}` | Delete | `DeleteAsync(id)` | `204`, or `404` |
+
+- **Search** (`QuoteService`): on a non-empty term, OR-matches `CustomerName` and the quote
+  id parsed from the number; ordered newest `CreatedDate` first, then `Id` desc.
+- **DTOs** (`Dtos/Quotes/`, records): `CreateQuoteRequest` / `UpdateQuoteRequest`
+  (`CustomerId` `[Range(1,…)]`, optional `ValidUntil`, `OverallDiscountPercent` `[Range(0,100)]`,
+  `Lines` `[Required, MinLength(1)]`), `QuoteLineRequest` (`Quantity` `[Range(1,…)]`,
+  `LineDiscountPercent` `[Range(0,100)]`), plus `QuoteResponse` (full + totals),
+  `QuoteSummaryResponse` (list), `QuoteLineResponse`. Nested annotations validate via
+  `[ApiController]`.
+- **Auth:** class-level `[Authorize]`; `POST`/`PUT`/`DELETE` add `[Authorize(Roles = Roles.Admin)]`.
+
+### Frontend (`MiniERP.Web`)
+
+- **Offertes page** (`/quotes`): searchable list (250 ms debounced) of offertenummer, klant,
+  datum, geldig tot, totaal. A single "Offerte toevoegen" button; per-row **Bekijk** (all
+  users) and **Wijzig/Verwijder** (Admin only). Delete confirms.
+- **`QuoteForm`** — one component for create + edit (modal): customer dropdown, dynamic line
+  editor (product dropdown + aantal + regelkorting%), overall korting, geldig tot, and a
+  **live totals preview** using the same formulas as the backend (server stays authoritative).
+- **Read-only detail view** for "Bekijk": lines table + totals, no editing.
+- **Dashboard** gains an "Offertes" count widget (`GET /quotes/count`) and an "Offertes
+  beheren" button.
+- **Role gating** mirrors the other pages.
+
+### Known trade-off
+
+Money stays `double` (matching `Product.Price`) rather than `decimal`, accepting the minor
+precision risk for type consistency across the pricing model.

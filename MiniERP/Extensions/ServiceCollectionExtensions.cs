@@ -13,11 +13,13 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IProductHandler, ProductHandler>();
         services.AddScoped<ICustomerHandler, CustomerHandler>();
         services.AddScoped<IAuthHandler, AuthHandler>();
+        services.AddScoped<IQuoteHandler, QuoteHandler>();
 
         // Services (persistence layer)
         services.AddScoped<IProductService, ProductService>();
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<IUserService, UserService>();
+        services.AddScoped<IQuoteService, QuoteService>();
 
         // Stateless framework helper for password hashing/verification.
         // Singleton is idiomatic here (it holds no request state).

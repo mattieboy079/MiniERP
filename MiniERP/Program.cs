@@ -116,6 +116,38 @@ await using (var scope = app.Services.CreateAsyncScope())
         db.Users.AddRange(admin, user);
         await db.SaveChangesAsync();
     }
+
+    // One sample quote so the dashboard "Offertes" widget has something to show. Prices
+    // are snapshotted from the seeded products, exactly as the create flow does.
+    if (!await db.Quotes.AnyAsync())
+    {
+        var customer = await db.Customers.OrderBy(c => c.Id).FirstOrDefaultAsync();
+        var sampleProducts = await db.Products.OrderBy(p => p.Id).Take(2).ToListAsync();
+
+        if (customer is not null && sampleProducts.Count > 0)
+        {
+            var now = DateTime.UtcNow;
+            db.Quotes.Add(new Quote
+            {
+                CustomerId = customer.Id,
+                CustomerName = customer.Name,
+                CreatedDate = now,
+                ValidUntil = now.AddDays(30),
+                OverallDiscountPercent = 0,
+                VatRate = 21,
+                Lines = sampleProducts.Select((p, i) => new QuoteLine
+                {
+                    ProductId = p.Id,
+                    ProductName = p.Name,
+                    ArticleNumber = p.ArticleNumber,
+                    UnitPrice = p.Price,
+                    Quantity = i + 1,
+                    LineDiscountPercent = 0,
+                }).ToList(),
+            });
+            await db.SaveChangesAsync();
+        }
+    }
 }
 
 app.Run();

@@ -56,6 +56,7 @@ function Dashboard() {
   const navigate = useNavigate()
   const customers = useCount('/customers/count')
   const lowStock = useCount('/products/low-stock/count')
+  const quotes = useCount('/quotes/count')
 
   return (
     <>
@@ -64,11 +65,13 @@ function Dashboard() {
       <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
         <StatCard label="Klanten" count={customers.count} loading={customers.loading} error={customers.error} />
         <StatCard label="Lage voorraad" count={lowStock.count} loading={lowStock.loading} error={lowStock.error} />
+        <StatCard label="Offertes" count={quotes.count} loading={quotes.loading} error={quotes.error} />
       </div>
 
-      <button onClick={() => navigate('/products')} style={{ marginTop: '1.5rem' }}>
-        Producten beheren
-      </button>
+      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem', flexWrap: 'wrap' }}>
+        <button onClick={() => navigate('/products')}>Producten beheren</button>
+        <button onClick={() => navigate('/quotes')}>Offertes beheren</button>
+      </div>
     </>
   )
 }

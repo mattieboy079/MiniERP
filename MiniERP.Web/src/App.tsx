@@ -3,6 +3,7 @@ import './App.css'
 import Dashboard from './pages/Dashboard'
 import Products from './pages/Products'
 import Customers from './pages/Customers'
+import Quotes from './pages/Quotes'
 import Login from './pages/Login'
 import { useAuth } from './auth/AuthContext'
 
@@ -35,6 +36,7 @@ function App() {
         <NavLink to="/">Dashboard</NavLink>
         <NavLink to="/products">Products</NavLink>
         <NavLink to="/customers">Customers</NavLink>
+        <NavLink to="/quotes">Offertes</NavLink>
         <span style={{ marginLeft: 'auto', color: '#666', fontSize: '0.9rem' }}>
           {user.username} ({user.role})
         </span>
@@ -45,6 +47,7 @@ function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/products" element={<Products />} />
         <Route path="/customers" element={<Customers />} />
+        <Route path="/quotes" element={<Quotes />} />
         {/* Logged in: the login route is pointless, send them home. */}
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
